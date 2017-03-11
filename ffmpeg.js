@@ -92,8 +92,8 @@ function FFMPEG(hap, ffmpegOpt) {
     video: {
       resolutions: videoResolutions,
       codec: {
-        profiles: [0, 1, 2], // Enum, please refer StreamController.VideoCodecParamProfileIDTypes
-        levels: [0, 1, 2] // Enum, please refer StreamController.VideoCodecParamLevelTypes
+        profiles: [2], // Enum, please refer StreamController.VideoCodecParamProfileIDTypes
+        levels: [2] // Enum, please refer StreamController.VideoCodecParamLevelTypes
       }
     },
     audio: {
@@ -101,10 +101,6 @@ function FFMPEG(hap, ffmpegOpt) {
         {
           type: "OPUS", // Audio Codec
           samplerate: 24 // 8, 16, 24 KHz
-        },
-        {
-          type: "AAC-eld",
-          samplerate: 16
         }
       ]
     }
@@ -171,7 +167,7 @@ FFMPEG.prototype.prepareStream = function(request, callback) {
 
     let audioResp = {
       port: targetPort,
-      ssrc: 1,
+      ssrc: 2,
       srtp_key: srtp_key,
       srtp_salt: srtp_salt
     };
@@ -180,7 +176,7 @@ FFMPEG.prototype.prepareStream = function(request, callback) {
 
     sessionInfo["audio_port"] = targetPort;
     sessionInfo["audio_srtp"] = Buffer.concat([srtp_key, srtp_salt]);
-    sessionInfo["audio_ssrc"] = 1; 
+    sessionInfo["audio_ssrc"] = 2; 
   }
 
   let currentAddress = ip.address();
@@ -230,9 +226,16 @@ FFMPEG.prototype.handleStreamRequest = function(request) {
         let targetAddress = sessionInfo["address"];
         let targetVideoPort = sessionInfo["video_port"];
         let videoKey = sessionInfo["video_srtp"];
+        
+        let audioInfo = request["audio"];
+        let targetAudioPort = sessionInfo["audio_port"];
+        let audioKey = sessionInfo["audio_srtp"];
+        audioInfo["max_bit_rate"] = 64;
+        let frameduration = audioInfo["packet_time"];
+        let ffmpegCommand = this.ffmpegSource + ' -map 0:v -codec:v libx264 -x264opts colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=off:analyse=0x3,0x133 -movflags +faststart -an -framerate ' + fps + ' -pix_fmt yuv420p -tune zerolatency -vf scale=w='+ width +':h='+ height +' -b:v '+ bitrate +'k -bufsize '+ bitrate +'k -strict experimental -flags +loop -i_qfactor 0.71 -rc_eq "blurCplx^(1-qComp)" -qcomp 0.6 -qmin 10 -qmax 51 -coder 0 -partitions parti4x4+partp8x8+partb8x8 -subq 5 -threads 5 -payload_type 99 -ssrc 1 -f rtp -srtp_out_suite AES_CM_128_HMAC_SHA1_80 -srtp_out_params '+videoKey.toString('base64')+' -rtsp_transport tcp -max_delay 500000 srtp://'+targetAddress+':'+targetVideoPort+'?&rtcpport='+targetVideoPort+'&pkt_size=1378';
+         ffmpegCommand += ' -map 0:a -vn -f u16le -c:a pcm_s16le -ac 1 -af aresample=24000 -codec:a libopus -b:a 64k -application lowdelay -frame_duration ' + frameduration + ' -compression_level 10 -dtx 1 -strict 2 -payload_type 110 -ssrc 2 -f rtp -srtp_out_suite AES_CM_128_HMAC_SHA1_80 -srtp_out_params '+audioKey.toString('base64')+' -rtsp_transport tcp -max_delay 500000 srtp://'+targetAddress+':'+targetAudioPort+'rtcpport='+targetAudioPort;
 
-        let ffmpegCommand = this.ffmpegSource + ' -threads 0 -vcodec libx264 -an -r '+ fps +' -g '+ fps +' -f libx264 -tune zerolatency -crf 10 -vf scale='+ width +':'+ height +' -bt 2M -b:v '+ bitrate +'k -bufsize '+ bitrate +'k -payload_type 99 -ssrc 1 -f rtp -srtp_out_suite AES_CM_128_HMAC_SHA1_80 -srtp_out_params '+videoKey.toString('base64')+' -rtsp_transport tcp srtp://'+targetAddress+':'+targetVideoPort+'?rtcpport='+targetVideoPort+'&localrtcpport='+targetVideoPort+'&pkt_size=1316';
-        console.log(ffmpegCommand);
+         console.log(ffmpegCommand);
         let ffmpeg = spawn('ffmpeg', ffmpegCommand.split(' '), {env: process.env});
         this.ongoingSessions[sessionIdentifier] = ffmpeg;
       }
